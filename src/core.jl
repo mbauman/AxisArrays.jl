@@ -270,7 +270,7 @@ end
 @inline Base.indices(A::AxisArray) = indices(A.data)
 @inline Base.indices(A::AxisArray, Ax::Axis) = indices(A.data, axisdim(A, Ax))
 @inline Base.indices(A::AxisArray, ::Type{Ax}) where {Ax<:Axis} = indices(A.data, axisdim(A, Ax))
-Base.convert(::Type{Array{T,N}}, A::AxisArray{T,N}) where {T,N} = convert(Array{T,N}, A.data)
+Base.(::Type{Array{T,N}}, A::AxisArray{T,N}) where {T,N} = convert(Array{T,N}, A.data)
 Base.parent(A::AxisArray) = A.data
 # Similar is tricky. If we're just changing the element type, it can stay as an
 # AxisArray. But if we're changing dimensions, there's no way it can know how
@@ -305,6 +305,58 @@ Base.similar(A::AxisArray, ::Type{S}, ax1::Axis, axs::Axis...) where {S} = simil
         AxisArray(d, $ax)
     end
 end
+
+Base.convert(::Type{AxisArray{T, N, A, As}},
+             array::AxisArray{T, N, A, As}) where {T, N, A, As} = array
+Base.convert(::Type{AxisArray{TT, N, AA, As}},
+             array::AxisArray{T, N, A, As}) where {TT, N, AA, As, T, A} =
+    AxisArray(convert(AA, array), axes(array))
+function Base.convert(I::Type{AxisArray{TT, N, AA, AAs}},
+                      array::AxisArray{T, N, A, As}
+                     )::AxisArray{TT, N, AA, AAs} where {TT, N, AA, AAs, T, A, As}
+    perm = indexin(collect(axisnames(I)), collect(axisnames(array)))
+    any(iszero(x) for x in perm) && throw(ArgumentError("Axes do not match"))
+    data = permutedims(convert(AA, array.data), perm)
+    AxisArray(data, convert.(collect(AAs.parameters), axes(array)[perm])...)
+end
+
+function Base.copy!(dest::AxisArray{TT, N, AA, As},
+                    source::AxisArray{T, N, A, As}) where {TT, N, AA, T, A, As}
+    copy!(dest.data, source.data)
+    dest
+end
+
+"""
+    copy!(dest::AxisArray, source::AxisArray) -> AxisArray
+
+Copies data from one AxisArray to another. All axis names should match, though they may
+be permutated. 
+
+To ignore axes, the use should call `copy!(dest.src, source.src)` instead, defaulting to
+the default `copy!` for the underlying array.
+"""
+function Base.copy!(dest::AxisArray{TT, N, AA, AAs},
+                    source::AxisArray{T, N, A, As}) where {TT, N, AA, AAs, T, A, As}
+    perm = indexin(collect(axisnames(dest)), collect(axisnames(source)))
+    any(iszero(x) for x in perm) &&
+            throw(ArgumentError("""
+                  Axes of source and destination do not match.
+                  Use copy!(A.src, B.src) if you want to ignore axis information.
+                  """))
+
+    permutedims!(dest.data, source.data, perm)
+    dest
+end
+
+"""
+    copy!(dest::AxisArray, daxes::Tuple, src::AxisArray, saxes::Tuple)
+
+Copies a block from one array to a block of another. The tuples identifying the blocks can
+be anything that `view` accepts. Hence it may include axis information.
+"""
+Base.copy!(dest::AxisArray, daxes::Tuple{Axis, Vararg{Axis}},
+           src::AxisArray, saxes::Tuple{Axis, Vararg{Axis}}) =
+    copy!(view(dest, daxes...), view(src, saxes...))
 
 # These methods allow us to preserve the AxisArray under reductions
 # Note that we only extend the following two methods, and then have it
